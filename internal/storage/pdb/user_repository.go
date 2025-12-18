@@ -1,4 +1,4 @@
-package storage
+package pdb
 
 import (
 	"BlackPawnChess-server/internal/models"

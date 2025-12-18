@@ -1,4 +1,4 @@
-package storage
+package rdb
 
 import (
 	"context"
