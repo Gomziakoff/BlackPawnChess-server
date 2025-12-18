@@ -1,0 +1,77 @@
+package main
+
+import (
+	"BlackPawnChess-server/internal/auth"
+	"BlackPawnChess-server/internal/models"
+	"BlackPawnChess-server/internal/router"
+	"BlackPawnChess-server/internal/sessions"
+	"BlackPawnChess-server/internal/storage"
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	dsn := "host=localhost user=chess_user password=secret dbname=chess port=5432 sslmode=disable"
+	db, err := storage.NewPostgres(dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := db.AutoMigrate(&models.User{}); err != nil {
+		log.Fatal(err)
+	}
+
+	userRepo := storage.NewRepository(db)
+
+	log.Println("Database connected and migrated successfully:", db != nil)
+
+	redisStorage, err := storage.NewRedis("localhost:6379", "", 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Redis connected succesfully:", redisStorage != nil)
+
+	sessionManager := sessions.NewManager(redisStorage, 7*24*time.Hour)
+	authHandler := auth.NewHandler(userRepo, sessionManager)
+
+	r := gin.Default()
+	router.Register(r, authHandler, sessionManager)
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			panic(err)
+		}
+	}()
+	println("Server started on :8080")
+
+	// -----------------------------
+	// 5. Ожидание сигнала завершения
+	// -----------------------------
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		println("Server forced to shutdown:", err.Error())
+	}
+	//TODO: make db.close()
+	println("Server exited gracefully")
+
+}

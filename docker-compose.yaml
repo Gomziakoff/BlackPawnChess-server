@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:15
+    container_name: chess_db
+    environment:
+      POSTGRES_USER: chess_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: chess
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:7
+    container_name: chess_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+volumes:
+  db_data:
