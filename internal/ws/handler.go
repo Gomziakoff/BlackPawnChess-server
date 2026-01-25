@@ -1,0 +1,172 @@
+package ws
+
+import (
+	gameservice "BlackPawnChess-server/internal/gameService"
+	"BlackPawnChess-server/internal/matchmaking"
+	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+)
+
+type Handler struct {
+	hub         *Hub
+	gameHub     *GameHub
+	matchmaker  matchmaking.Matchmaker
+	gameService gameservice.GameService
+}
+
+func NewHandler(hub *Hub, gameHub *GameHub, matchmaker matchmaking.Matchmaker) *Handler {
+	return &Handler{hub: hub, gameHub: gameHub, matchmaker: matchmaker}
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func (h *Handler) WS(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, ok := userIDValue.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user_id type"})
+		return
+	}
+
+	conn, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
+	h.hub.Add(userID, conn)
+	defer h.hub.Remove(userID)
+
+	for {
+		var msg IncomingMessage
+		if err := conn.ReadJSON(&msg); err != nil {
+			return
+		}
+
+		switch msg.T {
+		case "seek":
+			ctx := context.Background()
+
+			opponent, err := h.matchmaker.Seek(ctx, userID)
+			if err != nil {
+				h.hub.Notify(userID, OutgoingMessage{
+					T: "error",
+					D: "matchmaking failed",
+				})
+				continue
+			}
+
+			if opponent == 0 {
+				continue
+			}
+
+			gameID, err := h.gameService.StartGame(ctx, userID, opponent)
+			if err != nil {
+				h.hub.Notify(userID, OutgoingMessage{T: "error", D: "game creation failed"})
+				h.hub.Notify(opponent, OutgoingMessage{T: "error", D: "game creation failed"})
+				continue
+			}
+
+			redirectMsg := OutgoingMessage{
+				T: "redirect",
+				D: gin.H{
+					"gameId": gameID,
+					"url":    "/game/" + strconv.Itoa(gameID),
+				},
+			}
+
+			h.hub.Notify(userID, redirectMsg)
+			h.hub.Notify(opponent, redirectMsg)
+
+		case "stop-seek":
+			ctx := context.Background()
+			err := h.matchmaker.Cancel(ctx, userID)
+			if err != nil {
+				h.hub.Notify(userID, OutgoingMessage{T: "error", D: "game creation failed"})
+			}
+		}
+	}
+}
+
+func (h *Handler) GameWS(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, ok := userIDValue.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user_id type"})
+		return
+	}
+
+	gameIDStr := c.Param("id")
+	gameID, err := strconv.Atoi(gameIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game id"})
+		return
+	}
+
+	if h.gameService.GetGame(gameID) != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
+		return
+	}
+
+	whiteID, blackID, err := h.gameService.GetPlayers(gameID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot get players"})
+		return
+	}
+
+	if userID != whiteID && userID != blackID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a player"})
+		return
+	}
+
+	conn, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
+	h.gameHub.Add(gameID, userID, conn)
+	defer h.gameHub.Remove(gameID, userID)
+
+	// TODO: Добавить ожидание подключения игрока
+
+	for {
+		var msg IncomingMessage
+		if err := conn.ReadJSON(&msg); err != nil {
+			return
+		}
+
+		switch msg.T {
+		case "move":
+			var payload MovePayload
+			if err := json.Unmarshal(msg.D, &payload); err != nil {
+				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: "invalid move payload"})
+				continue
+			}
+			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
+
+			msg, err := h.gameService.MakeMove(gameID, userID, payload.U)
+			if err != nil {
+				h.hub.Notify(userID, OutgoingMessage{T: "error", D: err.Error()})
+				continue
+			}
+			//TODO: Сделать нормальную проверку конца игры
+
+			h.gameHub.Broadcast(gameID, msg)
+
+		case "resign":
+			msg, err := h.gameService.Resign(gameID, userID)
+			if err != nil {
+				h.hub.Notify(userID, OutgoingMessage{T: "error", D: err.Error()})
+				continue
+			}
+
+			h.gameHub.Broadcast(gameID, msg)
+		}
+	}
+}
