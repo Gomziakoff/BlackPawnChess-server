@@ -17,5 +17,6 @@ func registerWebSocketRoutes(
 	wsGroup.Use(middleware.Auth(sessionManager))
 	{
 		wsGroup.GET("", handler.WS)
+		wsGroup.GET("/game/:id", handler.GameWS)
 	}
 }

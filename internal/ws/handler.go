@@ -5,6 +5,7 @@ import (
 	"BlackPawnChess-server/internal/matchmaking"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -19,8 +20,8 @@ type Handler struct {
 	gameService gameservice.GameService
 }
 
-func NewHandler(hub *Hub, gameHub *GameHub, matchmaker matchmaking.Matchmaker) *Handler {
-	return &Handler{hub: hub, gameHub: gameHub, matchmaker: matchmaker}
+func NewHandler(hub *Hub, gameHub *GameHub, matchmaker matchmaking.Matchmaker, gameService gameservice.GameService) *Handler {
+	return &Handler{hub: hub, gameHub: gameHub, matchmaker: matchmaker, gameService: gameService}
 }
 
 var upgrader = websocket.Upgrader{
@@ -46,11 +47,16 @@ func (h *Handler) WS(c *gin.Context) {
 	for {
 		var msg IncomingMessage
 		if err := conn.ReadJSON(&msg); err != nil {
+			log.Println("WS read error:", err) //*
 			return
 		}
-
+		log.Printf("WS incoming from user %d: T=%s D=%s\n", userID, msg.T, string(msg.D)) //*
 		switch msg.T {
 		case "seek":
+			h.hub.Notify(userID, OutgoingMessage{ //*
+				T: "seek:received",
+			}) //*
+
 			ctx := context.Background()
 
 			opponent, err := h.matchmaker.Seek(ctx, userID)
@@ -148,13 +154,14 @@ func (h *Handler) GameWS(c *gin.Context) {
 				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: "invalid move payload"})
 				continue
 			}
-			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
 
 			msg, err := h.gameService.MakeMove(gameID, userID, payload.U)
 			if err != nil {
-				h.hub.Notify(userID, OutgoingMessage{T: "error", D: err.Error()})
+				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: err.Error()})
 				continue
 			}
+			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
+
 			//TODO: Сделать нормальную проверку конца игры
 
 			h.gameHub.Broadcast(gameID, msg)
@@ -162,7 +169,7 @@ func (h *Handler) GameWS(c *gin.Context) {
 		case "resign":
 			msg, err := h.gameService.Resign(gameID, userID)
 			if err != nil {
-				h.hub.Notify(userID, OutgoingMessage{T: "error", D: err.Error()})
+				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: err.Error()})
 				continue
 			}
 
