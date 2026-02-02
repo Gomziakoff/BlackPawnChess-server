@@ -8,6 +8,8 @@ import (
 var (
 	ErrNotYourTurn      = errors.New("not your turn")
 	ErrInvalidTurnState = errors.New("invalid turn state")
+	ErrEmptyMove        = errors.New("your move is empty")
+	ErrInvalidMove      = errors.New("invalid move")
 )
 
 type Service struct {
@@ -78,11 +80,19 @@ func (s *Service) MakeMove(gameID, playerID int, move string) (OutgoingMessage, 
 		return OutgoingMessage{}, ErrInvalidTurnState
 	}
 
+	fen, err := Validate(state, move)
+	if err != nil {
+		return OutgoingMessage{}, ErrInvalidMove
+	}
+
+	state.FEN = fen
+
 	if state.MovesUCI == "" {
-		state.MovesUCI = move
+		state.MovesUCI += move
 	} else {
 		state.MovesUCI += " " + move
 	}
+
 	state.Turn = 1 - state.Turn
 
 	if err := s.repo.SaveState(ctx, state); err != nil {

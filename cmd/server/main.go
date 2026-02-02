@@ -3,7 +3,6 @@ package main
 import (
 	"BlackPawnChess-server/internal/auth"
 	gameservice "BlackPawnChess-server/internal/gameService"
-	"BlackPawnChess-server/internal/games"
 	"BlackPawnChess-server/internal/matchmaking"
 	"BlackPawnChess-server/internal/models"
 	"BlackPawnChess-server/internal/router"
@@ -34,7 +33,7 @@ func main() {
 	if err := db.AutoMigrate(&models.User{}); err != nil {
 		log.Fatal(err)
 	}
-	if err := db.AutoMigrate(&games.Game{}); err != nil {
+	if err := db.AutoMigrate(&gameservice.Game{}); err != nil {
 		log.Fatal(err)
 	}
 
@@ -52,10 +51,6 @@ func main() {
 	sessionManager := sessions.NewManager(redisStorage, 7*24*time.Hour)
 	authHandler := auth.NewHandler(userRepo, sessionManager)
 
-	gamesRedisRepo := games.NewRedisRepo(redisStorage)
-	gamesRepository := games.NewRepository(db, gamesRedisRepo)
-	gamesHandler := games.NewHandler(gamesRepository, gamesRedisRepo)
-
 	hub := ws.NewHub()
 	gameHub := ws.NewGameHub()
 	matchmaker := matchmaking.NewRedisMatchmaker(redisStorage)
@@ -64,7 +59,7 @@ func main() {
 	wsHandler := ws.NewHandler(hub, gameHub, matchmaker, gameService)
 
 	r := gin.Default()
-	router.Register(r, authHandler, gamesHandler, wsHandler, sessionManager)
+	router.Register(r, authHandler, wsHandler, sessionManager)
 
 	srv := &http.Server{
 		Addr:    ":8080",
