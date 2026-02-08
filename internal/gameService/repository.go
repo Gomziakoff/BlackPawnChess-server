@@ -23,6 +23,14 @@ func (r *Repository) CreateGame(ctx context.Context, game *Game) error {
 	return r.db.WithContext(ctx).Create(game).Error
 }
 
+func (r *Repository) GetGame(ctx context.Context, gameID int) (Game, error) {
+	var g Game
+	if err := r.db.WithContext(ctx).First(&g, gameID).Error; err != nil {
+		return Game{}, err
+	}
+	return g, nil
+}
+
 func (r *Repository) GetPlayers(ctx context.Context, gameID int) (int, int, error) {
 	var g Game
 	if err := r.db.WithContext(ctx).First(&g, gameID).Error; err != nil {

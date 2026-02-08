@@ -1,6 +1,10 @@
 package gameservice
 
-import "github.com/notnil/chess"
+import (
+	"strings"
+
+	"github.com/notnil/chess"
+)
 
 type Validator interface {
 	Validate(game *GameState, move string) (string, error)
@@ -16,4 +20,20 @@ func Validate(game *GameState, move string) (string, error) {
 		return "", err
 	}
 	return g.FEN(), nil
+}
+
+func BuildGameFromMoves(moves string) (*chess.Game, error) {
+	g := chess.NewGame(chess.UseNotation(chess.UCINotation{}))
+
+	if moves == "" {
+		return g, nil
+	}
+
+	for _, m := range strings.Split(moves, " ") {
+		if err := g.MoveStr(m); err != nil {
+			return nil, err
+		}
+	}
+
+	return g, nil
 }

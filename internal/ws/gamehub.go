@@ -58,3 +58,24 @@ func (g *GameHub) Notify(gameID, userID int, msg any) {
 		_ = conn.WriteJSON(msg)
 	}
 }
+
+func (h *GameHub) Crowd(gameID int, whiteID, blackID int) map[string]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	crowd := map[string]bool{
+		"white": false,
+		"black": false,
+	}
+
+	if players, ok := h.games[gameID]; ok {
+		if _, ok := players[whiteID]; ok {
+			crowd["white"] = true
+		}
+		if _, ok := players[blackID]; ok {
+			crowd["black"] = true
+		}
+	}
+
+	return crowd
+}

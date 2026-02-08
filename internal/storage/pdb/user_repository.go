@@ -36,3 +36,14 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*models.Use
 	}
 	return &user, nil
 }
+
+func (r *Repository) FindByUserID(ctx context.Context, userID string) (*models.User, error) {
+	var user models.User
+	if err := r.db.WithContext(ctx).First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}

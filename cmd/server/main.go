@@ -2,6 +2,7 @@ package main
 
 import (
 	"BlackPawnChess-server/internal/auth"
+	"BlackPawnChess-server/internal/game"
 	gameservice "BlackPawnChess-server/internal/gameService"
 	"BlackPawnChess-server/internal/matchmaking"
 	"BlackPawnChess-server/internal/models"
@@ -55,11 +56,13 @@ func main() {
 	gameHub := ws.NewGameHub()
 	matchmaker := matchmaking.NewRedisMatchmaker(redisStorage)
 	gameServiceRepo := gameservice.NewRepository(db, redisStorage)
-	gameService := gameservice.NewService(gameServiceRepo)
+	gameService := gameservice.NewService(gameServiceRepo, userRepo)
 	wsHandler := ws.NewHandler(hub, gameHub, matchmaker, gameService)
 
+	gameHandler := game.NewHandler(gameService)
+
 	r := gin.Default()
-	router.Register(r, authHandler, wsHandler, sessionManager)
+	router.Register(r, authHandler, wsHandler, gameHandler, sessionManager)
 
 	srv := &http.Server{
 		Addr:    ":8080",

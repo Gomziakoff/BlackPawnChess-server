@@ -47,15 +47,15 @@ func (h *Handler) WS(c *gin.Context) {
 	for {
 		var msg IncomingMessage
 		if err := conn.ReadJSON(&msg); err != nil {
-			log.Println("WS read error:", err) //*
+			log.Println("WS read error:", err)
 			return
 		}
 		log.Printf("WS incoming from user %d: T=%s D=%s\n", userID, msg.T, string(msg.D)) //*
 		switch msg.T {
 		case "seek":
-			h.hub.Notify(userID, OutgoingMessage{ //*
+			h.hub.Notify(userID, OutgoingMessage{
 				T: "seek:received",
-			}) //*
+			})
 
 			ctx := context.Background()
 
@@ -63,7 +63,7 @@ func (h *Handler) WS(c *gin.Context) {
 			if err != nil {
 				h.hub.Notify(userID, OutgoingMessage{
 					T: "error",
-					D: "matchmaking failed",
+					D: err,
 				})
 				continue
 			}
@@ -119,7 +119,9 @@ func (h *Handler) GameWS(c *gin.Context) {
 		return
 	}
 
-	if h.gameService.GetGame(gameID) != nil {
+	_, err = h.gameService.GetGameState(gameID)
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
 		return
 	}
@@ -137,9 +139,22 @@ func (h *Handler) GameWS(c *gin.Context) {
 
 	conn, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
 	h.gameHub.Add(gameID, userID, conn)
-	defer h.gameHub.Remove(gameID, userID)
+	defer func() {
+		h.gameHub.Remove(gameID, userID)
 
-	// TODO: Добавить ожидание подключения игрока
+		crowd := h.gameHub.Crowd(gameID, whiteID, blackID)
+		h.gameHub.Broadcast(gameID, OutgoingMessage{
+			T: "crowd",
+			D: crowd,
+		})
+	}()
+
+	crowd := h.gameHub.Crowd(gameID, whiteID, blackID)
+
+	h.gameHub.Broadcast(gameID, OutgoingMessage{
+		T: "crowd",
+		D: crowd,
+	})
 
 	for {
 		var msg IncomingMessage
@@ -161,8 +176,6 @@ func (h *Handler) GameWS(c *gin.Context) {
 				continue
 			}
 			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
-
-			//TODO: Сделать нормальную проверку конца игры
 
 			h.gameHub.Broadcast(gameID, msg)
 
