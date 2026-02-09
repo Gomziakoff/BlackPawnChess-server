@@ -14,14 +14,21 @@ import (
 )
 
 type Handler struct {
-	hub         *Hub
-	gameHub     *GameHub
-	matchmaker  matchmaking.Matchmaker
-	gameService gameservice.GameService
+	hub           *Hub
+	gameHub       *GameHub
+	spectratorHub *SpectratorHub
+	matchmaker    matchmaking.Matchmaker
+	gameService   gameservice.GameService
 }
 
-func NewHandler(hub *Hub, gameHub *GameHub, matchmaker matchmaking.Matchmaker, gameService gameservice.GameService) *Handler {
-	return &Handler{hub: hub, gameHub: gameHub, matchmaker: matchmaker, gameService: gameService}
+func NewHandler(hub *Hub, gameHub *GameHub, spectratorHub *SpectratorHub, matchmaker matchmaking.Matchmaker, gameService *gameservice.Service) *Handler {
+	h := &Handler{hub: hub, gameHub: gameHub, spectratorHub: spectratorHub, matchmaker: matchmaker, gameService: gameService}
+
+	gameService.SetGameEventHandler(func(gameID int, msg gameservice.OutgoingMessage) {
+		h.gameHub.Broadcast(gameID, msg)
+	})
+
+	return h
 }
 
 var upgrader = websocket.Upgrader{
@@ -56,10 +63,18 @@ func (h *Handler) WS(c *gin.Context) {
 			h.hub.Notify(userID, OutgoingMessage{
 				T: "seek:received",
 			})
+			var payload SeekPayload
+			if err := json.Unmarshal(msg.D, &payload); err != nil {
+				h.hub.Notify(userID, OutgoingMessage{
+					T: "error",
+					D: "invalid seek payload",
+				})
+				continue
+			}
 
 			ctx := context.Background()
 
-			opponent, err := h.matchmaker.Seek(ctx, userID)
+			opponent, err := h.matchmaker.Seek(ctx, userID, payload.InitialTime, payload.Increment)
 			if err != nil {
 				h.hub.Notify(userID, OutgoingMessage{
 					T: "error",
@@ -72,7 +87,7 @@ func (h *Handler) WS(c *gin.Context) {
 				continue
 			}
 
-			gameID, err := h.gameService.StartGame(ctx, userID, opponent)
+			gameID, err := h.gameService.StartGame(ctx, userID, opponent, payload.InitialTime, payload.Increment)
 			if err != nil {
 				h.hub.Notify(userID, OutgoingMessage{T: "error", D: "game creation failed"})
 				h.hub.Notify(opponent, OutgoingMessage{T: "error", D: "game creation failed"})
@@ -142,19 +157,10 @@ func (h *Handler) GameWS(c *gin.Context) {
 	defer func() {
 		h.gameHub.Remove(gameID, userID)
 
-		crowd := h.gameHub.Crowd(gameID, whiteID, blackID)
-		h.gameHub.Broadcast(gameID, OutgoingMessage{
-			T: "crowd",
-			D: crowd,
-		})
+		h.broadcastCrowd(gameID)
 	}()
 
-	crowd := h.gameHub.Crowd(gameID, whiteID, blackID)
-
-	h.gameHub.Broadcast(gameID, OutgoingMessage{
-		T: "crowd",
-		D: crowd,
-	})
+	h.broadcastCrowd(gameID)
 
 	for {
 		var msg IncomingMessage
@@ -178,6 +184,7 @@ func (h *Handler) GameWS(c *gin.Context) {
 			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
 
 			h.gameHub.Broadcast(gameID, msg)
+			h.spectratorHub.Broadcast(gameID, msg)
 
 		case "resign":
 			msg, err := h.gameService.Resign(gameID, userID)
@@ -187,6 +194,86 @@ func (h *Handler) GameWS(c *gin.Context) {
 			}
 
 			h.gameHub.Broadcast(gameID, msg)
+			h.spectratorHub.Broadcast(gameID, msg)
+
+		case "flag":
+			msg, err := h.gameService.Flag(gameID)
+			if err != nil {
+				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: err.Error()})
+				continue
+			}
+			h.gameHub.Broadcast(gameID, msg)
+			h.spectratorHub.Broadcast(gameID, msg)
 		}
 	}
+}
+
+func (h *Handler) WatchWS(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, ok := userIDValue.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user_id type"})
+		return
+	}
+	gameIDStr := c.Param("id")
+	gameID, err := strconv.Atoi(gameIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game id"})
+		return
+	}
+
+	_, err = h.gameService.GetGameState(gameID)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
+		return
+	}
+
+	conn, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
+	h.spectratorHub.Add(gameID, userID, conn)
+	defer func() {
+		h.spectratorHub.Remove(gameID, userID)
+
+		h.broadcastCrowd(gameID)
+	}()
+
+	h.broadcastCrowd(gameID)
+
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+	}
+}
+
+func (h *Handler) BuildCrowd(gameID int, whiteID, blackID int) map[string]interface{} {
+	crowd := make(map[string]interface{})
+
+	players := h.gameHub.Crowd(gameID, whiteID, blackID)
+	crowd["white"] = players["white"]
+	crowd["black"] = players["black"]
+	crowd["spectators"] = h.spectratorHub.Count(gameID)
+
+	return crowd
+}
+
+func (h *Handler) broadcastCrowd(gameID int) {
+	whiteID, blackID, _ := h.gameService.GetPlayers(gameID)
+
+	crowd := h.BuildCrowd(gameID, whiteID, blackID)
+
+	h.gameHub.Broadcast(gameID, OutgoingMessage{
+		T: "crowd",
+		D: crowd,
+	})
+
+	h.spectratorHub.Broadcast(gameID, OutgoingMessage{
+		T: "crowd",
+		D: crowd,
+	})
 }

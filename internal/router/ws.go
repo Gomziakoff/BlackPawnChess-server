@@ -18,5 +18,6 @@ func registerWebSocketRoutes(
 	{
 		wsGroup.GET("", handler.WS)
 		wsGroup.GET("/game/:id", handler.GameWS)
+		wsGroup.GET("/watch/:id", handler.WatchWS)
 	}
 }

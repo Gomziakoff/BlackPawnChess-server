@@ -7,6 +7,7 @@ type GameService interface {
 	GetGameState(gameID int) (*GameState, error)
 	GetPlayers(gameId int) (int, int, error)
 	MakeMove(gameID, playerID int, move string) (OutgoingMessage, error)
+	Flag(gameID int) (OutgoingMessage, error)
 	Resign(gameID, playerID int) (OutgoingMessage, error)
 	GetGame(gameID int) (*GameSnapshot, error)
 }

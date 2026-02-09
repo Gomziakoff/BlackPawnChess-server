@@ -16,3 +16,8 @@ type MovePayload struct {
 	U string `json:"u"`
 	A int    `json:"a"`
 }
+
+type SeekPayload struct {
+	InitialTime int `json:"initialTime"`
+	Increment   int `json:"increment"`
+}

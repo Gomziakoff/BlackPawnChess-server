@@ -54,10 +54,11 @@ func main() {
 
 	hub := ws.NewHub()
 	gameHub := ws.NewGameHub()
+	spectratorHub := ws.NewSpectratorHub()
 	matchmaker := matchmaking.NewRedisMatchmaker(redisStorage)
 	gameServiceRepo := gameservice.NewRepository(db, redisStorage)
 	gameService := gameservice.NewService(gameServiceRepo, userRepo)
-	wsHandler := ws.NewHandler(hub, gameHub, matchmaker, gameService)
+	wsHandler := ws.NewHandler(hub, gameHub, spectratorHub, matchmaker, gameService)
 
 	gameHandler := game.NewHandler(gameService)
 
