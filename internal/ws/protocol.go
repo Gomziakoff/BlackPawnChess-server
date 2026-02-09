@@ -1,0 +1,23 @@
+package ws
+
+import "encoding/json"
+
+type IncomingMessage struct {
+	T string          `json:"t"`
+	D json.RawMessage `json:"d,omitempty"`
+}
+
+type OutgoingMessage struct {
+	T string      `json:"t"`
+	D interface{} `json:"d,omitempty"`
+}
+
+type MovePayload struct {
+	U string `json:"u"`
+	A int    `json:"a"`
+}
+
+type SeekPayload struct {
+	InitialTime int `json:"initialTime"`
+	Increment   int `json:"increment"`
+}

@@ -1,7 +1,7 @@
 package sessions
 
 import (
-	"BlackPawnChess-server/internal/storage"
+	"BlackPawnChess-server/internal/storage/rdb"
 	"context"
 	"errors"
 	"time"
@@ -10,15 +10,15 @@ import (
 )
 
 var (
-	ErrSessionNotFound = errors.New("Session not found")
+	ErrSessionNotFound = errors.New("SESSION NOT FOUND")
 )
 
 type Manager struct {
-	rdb *storage.Redis
+	rdb *rdb.Redis
 	ttl time.Duration
 }
 
-func NewManager(redis *storage.Redis, ttl time.Duration) *Manager {
+func NewManager(redis *rdb.Redis, ttl time.Duration) *Manager {
 	return &Manager{
 		rdb: redis,
 		ttl: ttl,
@@ -31,7 +31,7 @@ func (m *Manager) CreateSession(
 ) (string, error) {
 	sessionID := uuid.NewString()
 
-	session := storage.Session{
+	session := rdb.Session{
 		UserID:    userID,
 		CreatedAt: time.Now(),
 	}

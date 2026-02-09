@@ -10,9 +10,15 @@ type User struct {
 	Email        string `gorm:"type:varchar(100);unique;not null"`
 	PasswordHash string `gorm:"not null"`
 
-	EloRapid  int `gorm:"default:1200"`
-	EloBlitz  int `gorm:"default:1200"`
-	EloBullet int `gorm:"default:1200"`
+	EloClassical int `gorm:"default:1200"`
+	EloRapid     int `gorm:"default:1200"`
+	EloBlitz     int `gorm:"default:1200"`
+	EloBullet    int `gorm:"default:1200"`
+
+	GamesClassical int `gorm:"default:0"`
+	GamesRapid     int `gorm:"default:0"`
+	GamesBlitz     int `gorm:"default:0"`
+	GamesBullet    int `gorm:"default:0"`
 
 	AvatarURL string
 	Title     string

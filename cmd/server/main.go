@@ -2,10 +2,17 @@ package main
 
 import (
 	"BlackPawnChess-server/internal/auth"
+	"BlackPawnChess-server/internal/game"
+	gameservice "BlackPawnChess-server/internal/gameService"
+	"BlackPawnChess-server/internal/matchmaking"
 	"BlackPawnChess-server/internal/models"
 	"BlackPawnChess-server/internal/router"
 	"BlackPawnChess-server/internal/sessions"
-	"BlackPawnChess-server/internal/storage"
+	"BlackPawnChess-server/internal/ws"
+
+	"BlackPawnChess-server/internal/storage/pdb"
+	"BlackPawnChess-server/internal/storage/rdb"
+
 	"context"
 	"log"
 	"net/http"
@@ -19,7 +26,7 @@ import (
 
 func main() {
 	dsn := "host=localhost user=chess_user password=secret dbname=chess port=5432 sslmode=disable"
-	db, err := storage.NewPostgres(dsn)
+	db, err := pdb.NewPostgres(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -27,12 +34,15 @@ func main() {
 	if err := db.AutoMigrate(&models.User{}); err != nil {
 		log.Fatal(err)
 	}
+	if err := db.AutoMigrate(&gameservice.Game{}); err != nil {
+		log.Fatal(err)
+	}
 
-	userRepo := storage.NewRepository(db)
+	userRepo := pdb.NewRepository(db)
 
 	log.Println("Database connected and migrated successfully:", db != nil)
 
-	redisStorage, err := storage.NewRedis("localhost:6379", "", 0)
+	redisStorage, err := rdb.NewRedis("localhost:6379", "", 0)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -42,8 +52,18 @@ func main() {
 	sessionManager := sessions.NewManager(redisStorage, 7*24*time.Hour)
 	authHandler := auth.NewHandler(userRepo, sessionManager)
 
+	hub := ws.NewHub()
+	gameHub := ws.NewGameHub()
+	spectratorHub := ws.NewSpectratorHub()
+	matchmaker := matchmaking.NewRedisMatchmaker(redisStorage)
+	gameServiceRepo := gameservice.NewRepository(db, redisStorage)
+	gameService := gameservice.NewService(gameServiceRepo, userRepo)
+	wsHandler := ws.NewHandler(hub, gameHub, spectratorHub, matchmaker, gameService)
+
+	gameHandler := game.NewHandler(gameService)
+
 	r := gin.Default()
-	router.Register(r, authHandler, sessionManager)
+	router.Register(r, authHandler, wsHandler, gameHandler, sessionManager)
 
 	srv := &http.Server{
 		Addr:    ":8080",
