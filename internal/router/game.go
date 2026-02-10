@@ -2,6 +2,8 @@ package router
 
 import (
 	"BlackPawnChess-server/internal/game"
+	"BlackPawnChess-server/internal/middleware"
+	"BlackPawnChess-server/internal/sessions"
 
 	"github.com/gin-gonic/gin"
 )
@@ -9,9 +11,11 @@ import (
 func registerGameRoutes(
 	api *gin.RouterGroup,
 	handler *game.Handler,
+	sessionManager *sessions.Manager,
 ) {
-	authGroup := api.Group("/game")
+	gameGroup := api.Group("/game")
+	gameGroup.Use(middleware.Auth(sessionManager))
 	{
-		authGroup.GET("/:id", handler.GetGame)
+		gameGroup.GET("/:id", handler.GetGame)
 	}
 }

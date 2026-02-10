@@ -5,9 +5,13 @@ import "time"
 type GameStatus string
 
 const (
-	GameWaiting  GameStatus = "waiting"
-	GameActive   GameStatus = "active"
-	GameFinished GameStatus = "finished"
+	GameWaiting   GameStatus = "waiting"
+	GameActive    GameStatus = "active"
+	GameAborted   GameStatus = "aborted"
+	GameCheckmate GameStatus = "checkmate"
+	GameDraw      GameStatus = "draw"
+	GameResign    GameStatus = "resign"
+	GameOutOfTime GameStatus = "outOfTime"
 )
 
 type Game struct {
@@ -15,6 +19,8 @@ type Game struct {
 	WhiteUserID     int        `gorm:"not null"`
 	BlackUserID     *int       `gorm:"null"`
 	Status          GameStatus `gorm:"type:varchar(16);not null"`
+	Winner          string     `gorm:"type:text"`
+	FEN             string     `gorm:"type:text"`
 	MovesUCI        string     `gorm:"type:text;not null;default:''"`
 	Speed           string     `gorm:"type:text;not null;default:'rapid'"`
 	InitialTime     int        `gorm:"not null"`

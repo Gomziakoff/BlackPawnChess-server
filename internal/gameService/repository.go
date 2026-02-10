@@ -42,14 +42,16 @@ func (r *Repository) GetPlayers(ctx context.Context, gameID int) (int, int, erro
 	return g.WhiteUserID, *g.BlackUserID, nil
 }
 
-func (r *Repository) FinishGame(ctx context.Context, gameID int, state *GameState, whiteDiff, blackDiff int) error {
+func (r *Repository) FinishGame(ctx context.Context, gameID int, state *GameState, whiteDiff, blackDiff int, winner string, status GameStatus) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).
 		Model(&Game{}).
 		Where("id = ?", gameID).
 		Updates(map[string]interface{}{
-			"status":            GameFinished,
+			"status":            status,
+			"winner":            winner,
 			"moves_uci":         state.MovesUCI,
+			"fen":               state.FEN,
 			"white_time_left":   state.WhiteTimeLeft,
 			"black_time_left":   state.BlackTimeLeft,
 			"white_rating_diff": whiteDiff,
