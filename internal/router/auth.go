@@ -23,5 +23,6 @@ func registerAuthRoutes(
 	protected.Use(middleware.Auth(sessionManager))
 	{
 		protected.POST("/logout", handler.Logout)
+		protected.GET("/me", handler.Me)
 	}
 }

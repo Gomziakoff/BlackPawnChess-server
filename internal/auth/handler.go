@@ -5,6 +5,7 @@ import (
 	"BlackPawnChess-server/pkg/hashing"
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
+	FindByUserID(ctx context.Context, userID string) (*models.User, error)
 }
 
 type SessionManager interface {
@@ -103,6 +105,25 @@ func (h *Handler) Login(c *gin.Context) {
 		"email":    user.Email,
 		"username": user.Username,
 	})
+}
+
+func (h *Handler) Me(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, ok := userIDValue.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user_id type"})
+		return
+	}
+	user, err := h.users.FindByUserID(c, strconv.Itoa(userID))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) Logout(c *gin.Context) {
