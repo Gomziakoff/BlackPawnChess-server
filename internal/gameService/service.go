@@ -203,7 +203,7 @@ func (s *Service) getFinishedGameSnapshot(game Game, userID int) (*GameSnapshot,
 			LastMove:  lastMove,
 		},
 		Clock: &ClockJSON{
-			Running:   true,
+			Running:   false,
 			Initial:   game.InitialTime,
 			Increment: game.Increment,
 			White:     game.WhiteTimeLeft,
@@ -250,16 +250,17 @@ func mapSteps(movesUCI string) []StepJSON {
 			break
 		}
 
+		pos := game.Position()
+		san := chess.AlgebraicNotation{}.Encode(pos, move)
+
 		if err := game.Move(move); err != nil {
 			break
 		}
 
-		pos := game.Position()
-
 		step := StepJSON{
 			Ply:   i + 1,
 			UCI:   uci,
-			SAN:   chess.AlgebraicNotation{}.Encode(pos, move),
+			SAN:   san,
 			FEN:   pos.String(),
 			Check: move.HasTag(chess.Check),
 		}
@@ -342,8 +343,15 @@ func (s *Service) MakeMove(gameID, playerID int, move string) ([]OutgoingMessage
 
 	moves := g.Moves()
 	lastMove := moves[len(moves)-1]
+
+	positions := g.Positions()
+	if len(positions) < 2 {
+		return []OutgoingMessage{}, errors.New("internal error: no previous position")
+	}
+	prevPos := positions[len(positions)-2]
+
 	san := chess.AlgebraicNotation{}.Encode(
-		g.Position(),
+		prevPos,
 		lastMove,
 	)
 	ply := len(strings.Fields(state.MovesUCI))

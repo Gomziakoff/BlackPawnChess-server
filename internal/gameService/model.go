@@ -23,12 +23,12 @@ type Game struct {
 	FEN             string     `gorm:"type:text"`
 	MovesUCI        string     `gorm:"type:text;not null;default:''"`
 	Speed           string     `gorm:"type:text;not null;default:'rapid'"`
-	InitialTime     int        `gorm:"not null"`
-	Increment       int        `gorm:"not null"`
-	WhiteTimeLeft   int        `gorm:"not null"`
-	BlackTimeLeft   int        `gorm:"not null"`
-	Turn            int        `gorm:"not null"`
-	LastMoveAt      int64      `gorm:"not null"`
+	InitialTime     int        `gorm:"not null;default:0"`
+	Increment       int        `gorm:"not null;default:0"`
+	WhiteTimeLeft   int        `gorm:"not null;default:0"`
+	BlackTimeLeft   int        `gorm:"not null;default:0"`
+	Turn            int        `gorm:"not null;default:0"`
+	LastMoveAt      int64      `gorm:"not null;default:0"`
 	WhiteRatingDiff int        `gorm:"not null;default:0"`
 	BlackRatingDiff int        `gorm:"not null;default:0"`
 	CreatedAt       time.Time
