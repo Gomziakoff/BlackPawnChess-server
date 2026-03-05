@@ -261,7 +261,7 @@ func mapSteps(movesUCI string) []StepJSON {
 			Ply:   i + 1,
 			UCI:   uci,
 			SAN:   san,
-			FEN:   pos.String(),
+			FEN:   game.Position().String(),
 			Check: move.HasTag(chess.Check),
 		}
 

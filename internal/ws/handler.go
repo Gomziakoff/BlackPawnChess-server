@@ -110,6 +110,8 @@ func (h *Handler) WS(c *gin.Context) {
 			if err != nil {
 				h.hub.Notify(userID, OutgoingMessage{T: "error", D: "game creation failed"})
 			}
+		case "ping":
+			h.hub.Notify(userID, OutgoingMessage{T: "pong"})
 		}
 	}
 }
@@ -205,6 +207,8 @@ func (h *Handler) GameWS(c *gin.Context) {
 			}
 			h.gameHub.Broadcast(gameID, msg)
 			h.spectratorHub.Broadcast(gameID, msg)
+		case "ping":
+			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "pong"})
 		}
 	}
 }
