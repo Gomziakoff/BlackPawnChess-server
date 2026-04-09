@@ -144,6 +144,24 @@ func (s *Service) getActiveGameSnapshot(game Game, userID int) (*GameSnapshot, e
 		return nil, err
 	}
 
+	now := time.Now().Unix()
+	elapsedSinceLastMove := int(now - state.LastMoveAt)
+
+	whiteTime := state.WhiteTimeLeft
+	blackTime := state.BlackTimeLeft
+
+	if state.Turn == 0 { // Ход белых
+		whiteTime -= elapsedSinceLastMove
+		if whiteTime < 0 {
+			whiteTime = 0
+		}
+	} else { // Ход черных
+		blackTime -= elapsedSinceLastMove
+		if blackTime < 0 {
+			blackTime = 0
+		}
+	}
+
 	player := "White"
 	if userID == state.BlackUserID {
 		player = "Black"
@@ -170,11 +188,11 @@ func (s *Service) getActiveGameSnapshot(game Game, userID int) (*GameSnapshot, e
 			Running:   true,
 			Initial:   state.InitialTime,
 			Increment: state.Increment,
-			White:     state.WhiteTimeLeft,
-			Black:     state.BlackTimeLeft,
+			White:     whiteTime,
+			Black:     blackTime,
 		},
-		White:       s.mapPlayer(game.WhiteUserID, "white"),
-		Black:       s.mapPlayer(*game.BlackUserID, "black"),
+		White:       s.mapPlayer(game.WhiteUserID, "white", game.Speed),
+		Black:       s.mapPlayer(*game.BlackUserID, "black", game.Speed),
 		Steps:       mapSteps(state.MovesUCI),
 		Orientation: player,
 	}, nil
@@ -209,17 +227,32 @@ func (s *Service) getFinishedGameSnapshot(game Game, userID int) (*GameSnapshot,
 			White:     game.WhiteTimeLeft,
 			Black:     game.BlackTimeLeft,
 		},
-		White:       s.mapPlayer(game.WhiteUserID, "white"),
-		Black:       s.mapPlayer(*game.BlackUserID, "black"),
+		White:       s.mapPlayer(game.WhiteUserID, "white", game.Speed),
+		Black:       s.mapPlayer(*game.BlackUserID, "black", game.Speed),
 		Steps:       mapSteps(game.MovesUCI),
 		Orientation: player,
 	}, nil
 }
 
-func (s *Service) mapPlayer(userID int, color string) PlayerJSON {
+func (s *Service) mapPlayer(userID int, color string, speed string) PlayerJSON {
 	user, err := s.user.FindByUserID(context.Background(), strconv.Itoa(userID))
 	if err != nil {
 		return PlayerJSON{}
+	}
+
+	// Выбираем рейтинг в зависимости от категории скорости
+	var rating int
+	switch strings.ToLower(speed) {
+	case "bullet":
+		rating = user.EloBullet
+	case "blitz":
+		rating = user.EloBlitz
+	case "rapid":
+		rating = user.EloRapid
+	case "classical":
+		rating = user.EloClassical
+	default:
+		rating = user.EloRapid // Фолбек на рапид
 	}
 
 	return PlayerJSON{
@@ -227,9 +260,9 @@ func (s *Service) mapPlayer(userID int, color string) PlayerJSON {
 		User: UserJSON{
 			ID:       user.Id,
 			Username: user.Username,
-			Rating:   user.EloRapid,
+			Rating:   rating,
 		},
-		Rating: user.EloRapid,
+		Rating: rating,
 	}
 }
 
@@ -455,6 +488,7 @@ func (s *Service) checkFlag(ctx context.Context, state *GameState) (*OutgoingMes
 			if err != nil {
 				return nil, err
 			}
+			state.WhiteTimeLeft = 0
 			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff, "Black", GameOutOfTime); err != nil {
 				return nil, err
 			}
@@ -478,10 +512,11 @@ func (s *Service) checkFlag(ctx context.Context, state *GameState) (*OutgoingMes
 		}
 	case 1:
 		if state.BlackTimeLeft-elapsed <= 0 {
-			whiteDiff, blackDiff, err := s.user.UpdateRatings(ctx, state.WhiteUserID, state.BlackUserID, 0, state.Speed)
+			whiteDiff, blackDiff, err := s.user.UpdateRatings(ctx, state.WhiteUserID, state.BlackUserID, 1, state.Speed)
 			if err != nil {
 				return nil, err
 			}
+			state.BlackTimeLeft = 0
 			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff, "White", GameOutOfTime); err != nil {
 				return nil, err
 			}
