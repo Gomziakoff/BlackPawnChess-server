@@ -9,6 +9,9 @@ import (
 	"BlackPawnChess-server/internal/router"
 	"BlackPawnChess-server/internal/sessions"
 	"BlackPawnChess-server/internal/ws"
+	"BlackPawnChess-server/pkg/helpers"
+	"strconv"
+	"strings"
 
 	"BlackPawnChess-server/internal/storage/pdb"
 	"BlackPawnChess-server/internal/storage/rdb"
@@ -21,11 +24,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	dsn := "host=localhost user=chess_user password=secret dbname=chess port=5432 sslmode=disable"
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
+
+	dsn := helpers.GetEnv("DB_DSN", "host=localhost user=chess_user password=secret dbname=chess port=5432 sslmode=disable")
 	db, err := pdb.NewPostgres(dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -42,14 +51,21 @@ func main() {
 
 	log.Println("Database connected and migrated successfully:", db != nil)
 
-	redisStorage, err := rdb.NewRedis("localhost:6379", "", 0)
+	redisAddr := helpers.GetEnv("REDIS_ADDR", "localhost:6379")
+	redisPass := helpers.GetEnv("REDIS_PASSWORD", "")
+	serverPort := helpers.GetEnv("PORT", "8080")
+
+	sessionHours, _ := strconv.Atoi(helpers.GetEnv("SESSION_DURATION_HOURS", "168"))
+	sessionDuration := time.Duration(sessionHours) * time.Hour
+
+	redisStorage, err := rdb.NewRedis(redisAddr, redisPass, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Println("Redis connected succesfully:", redisStorage != nil)
 
-	sessionManager := sessions.NewManager(redisStorage, 7*24*time.Hour)
+	sessionManager := sessions.NewManager(redisStorage, sessionDuration)
 	authHandler := auth.NewHandler(userRepo, sessionManager)
 
 	hub := ws.NewHub()
@@ -62,11 +78,26 @@ func main() {
 
 	gameHandler := game.NewHandler(gameService)
 
+	gin.SetMode(helpers.GetEnv("GIN_MODE", "debug"))
 	r := gin.Default()
+
+	allowedOrigins := strings.Split(helpers.GetEnv("ALLOWED_ORIGINS", "http://localhost:5173"), ",")
+
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: allowedOrigins,
+		AllowOriginFunc: func(origin string) bool {
+			// Разрешаем любой поддомен trycloudflare.com
+			return strings.HasSuffix(origin, ".trycloudflare.com")
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 	router.Register(r, authHandler, wsHandler, gameHandler, sessionManager)
 
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + serverPort,
 		Handler: r,
 	}
 
@@ -75,7 +106,7 @@ func main() {
 			panic(err)
 		}
 	}()
-	println("Server started on :8080")
+	log.Printf("Server started on :%s", serverPort)
 
 	// -----------------------------
 	// 5. Ожидание сигнала завершения

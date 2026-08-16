@@ -23,6 +23,16 @@ func (h *Handler) GetGame(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game id"})
 		return
 	}
-	snapshot, err := h.gameService.GetGame(gameID)
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, ok := userIDValue.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user_id type"})
+		return
+	}
+	snapshot, err := h.gameService.GetGame(gameID, userID)
 	c.JSON(200, snapshot)
 }

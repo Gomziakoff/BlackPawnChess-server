@@ -57,7 +57,6 @@ func (h *Handler) WS(c *gin.Context) {
 			log.Println("WS read error:", err)
 			return
 		}
-		log.Printf("WS incoming from user %d: T=%s D=%s\n", userID, msg.T, string(msg.D)) //*
 		switch msg.T {
 		case "seek":
 			h.hub.Notify(userID, OutgoingMessage{
@@ -111,6 +110,8 @@ func (h *Handler) WS(c *gin.Context) {
 			if err != nil {
 				h.hub.Notify(userID, OutgoingMessage{T: "error", D: "game creation failed"})
 			}
+		case "ping":
+			h.hub.Notify(userID, OutgoingMessage{T: "pong"})
 		}
 	}
 }
@@ -176,15 +177,17 @@ func (h *Handler) GameWS(c *gin.Context) {
 				continue
 			}
 
-			msg, err := h.gameService.MakeMove(gameID, userID, payload.U)
+			msgs, err := h.gameService.MakeMove(gameID, userID, payload.U)
 			if err != nil {
 				h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "error", D: err.Error()})
 				continue
 			}
 			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "ack", D: payload.A})
 
-			h.gameHub.Broadcast(gameID, msg)
-			h.spectratorHub.Broadcast(gameID, msg)
+			for _, m := range msgs {
+				h.gameHub.Broadcast(gameID, m)
+				h.spectratorHub.Broadcast(gameID, m)
+			}
 
 		case "resign":
 			msg, err := h.gameService.Resign(gameID, userID)
@@ -204,6 +207,8 @@ func (h *Handler) GameWS(c *gin.Context) {
 			}
 			h.gameHub.Broadcast(gameID, msg)
 			h.spectratorHub.Broadcast(gameID, msg)
+		case "ping":
+			h.gameHub.Notify(gameID, userID, OutgoingMessage{T: "pong"})
 		}
 	}
 }

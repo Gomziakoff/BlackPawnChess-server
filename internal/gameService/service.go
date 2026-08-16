@@ -40,7 +40,7 @@ func (s *Service) SetGameEventHandler(fn func(int, OutgoingMessage)) {
 	s.onGameEvent = fn
 }
 
-func (s *Service) startFirstMoveTimer(gameID, playerID int, timeoutSec int) {
+func (s *Service) startFirstMoveTimer(gameID int, expectedMoves int, timeoutSec int) {
 	go func() {
 		timer := time.NewTimer(time.Duration(timeoutSec) * time.Second)
 		<-timer.C
@@ -51,23 +51,26 @@ func (s *Service) startFirstMoveTimer(gameID, playerID int, timeoutSec int) {
 			return
 		}
 
-		if len(strings.Fields(state.MovesUCI)) > 0 && state.Turn != playerID {
+		movesCount := len(strings.Fields(state.MovesUCI))
+
+		if movesCount > expectedMoves {
 			return
 		}
 
-		_ = s.repo.FinishGame(ctx, gameID, state, 0, 0)
+		_ = s.repo.FinishGame(ctx, gameID, state, 0, 0, "", GameAborted)
 		_ = s.repo.DeleteState(ctx, gameID)
 
-		msg := OutgoingMessage{
-			T: "game_end",
-			D: map[string]any{
-				"method":  "timeout_first_move",
-				"outcome": map[string]string{strconv.Itoa(state.WhiteUserID): "black", strconv.Itoa(state.BlackUserID): "white"}[strconv.Itoa(playerID)],
-			},
-		}
-
 		if s.onGameEvent != nil {
-			s.onGameEvent(gameID, msg)
+			s.onGameEvent(gameID, OutgoingMessage{
+				T: "EndData",
+				D: EndGameJSON{
+					Clock: ClockJSON{
+						White: state.WhiteTimeLeft,
+						Black: state.BlackTimeLeft,
+					},
+					Status: "Aborted",
+				},
+			})
 		}
 	}()
 }
@@ -112,7 +115,7 @@ func (s *Service) StartGame(ctx context.Context, whiteID, blackID, initialTime, 
 		return 0, err
 	}
 
-	s.startFirstMoveTimer(state.GameID, state.WhiteUserID, 60)
+	s.startFirstMoveTimer(state.GameID, 0, 60)
 
 	return game.ID, nil
 }
@@ -122,23 +125,46 @@ func (s *Service) GetGameState(gameID int) (*GameState, error) {
 	return state, err
 }
 
-func (s *Service) GetGame(gameID int) (*GameSnapshot, error) {
+func (s *Service) GetGame(gameID, userID int) (*GameSnapshot, error) {
 	game, err := s.repo.GetGame(context.Background(), gameID)
 	if err != nil {
 		return nil, err
 	}
 
-	if game.Status != GameFinished {
-		return s.getActiveGameSnapshot(game)
+	if game.Status == GameActive {
+		return s.getActiveGameSnapshot(game, userID)
 	}
 
-	return s.getFinishedGameSnapshot(game)
+	return s.getFinishedGameSnapshot(game, userID)
 }
 
-func (s *Service) getActiveGameSnapshot(game Game) (*GameSnapshot, error) {
+func (s *Service) getActiveGameSnapshot(game Game, userID int) (*GameSnapshot, error) {
 	state, err := s.repo.GetState(context.Background(), game.ID)
 	if err != nil {
 		return nil, err
+	}
+
+	now := time.Now().Unix()
+	elapsedSinceLastMove := int(now - state.LastMoveAt)
+
+	whiteTime := state.WhiteTimeLeft
+	blackTime := state.BlackTimeLeft
+
+	if state.Turn == 0 { // Ход белых
+		whiteTime -= elapsedSinceLastMove
+		if whiteTime < 0 {
+			whiteTime = 0
+		}
+	} else { // Ход черных
+		blackTime -= elapsedSinceLastMove
+		if blackTime < 0 {
+			blackTime = 0
+		}
+	}
+
+	player := "White"
+	if userID == state.BlackUserID {
+		player = "Black"
 	}
 
 	moves := strings.Fields(state.MovesUCI)
@@ -149,44 +175,84 @@ func (s *Service) getActiveGameSnapshot(game Game) (*GameSnapshot, error) {
 
 	return &GameSnapshot{
 		Game: GameJSON{
-			ID:       game.ID,
-			FEN:      state.FEN,
-			Turns:    len(moves),
-			Status:   string(game.Status),
-			LastMove: lastMove,
+			ID:        game.ID,
+			Speed:     game.Speed,
+			CreatedAt: game.CreatedAt.Unix(),
+			FEN:       state.FEN,
+			Turns:     len(moves),
+			Status:    string(game.Status),
+			Player:    player,
+			LastMove:  lastMove,
 		},
-		Clock: &ClockJSON{},
-		White: s.mapPlayer(game.WhiteUserID, "white"),
-		Black: s.mapPlayer(*game.BlackUserID, "black"),
-		Steps: mapSteps(state.MovesUCI),
+		Clock: &ClockJSON{
+			Running:   true,
+			Initial:   state.InitialTime,
+			Increment: state.Increment,
+			White:     whiteTime,
+			Black:     blackTime,
+		},
+		White:       s.mapPlayer(game.WhiteUserID, "white", game.Speed),
+		Black:       s.mapPlayer(*game.BlackUserID, "black", game.Speed),
+		Steps:       mapSteps(state.MovesUCI),
+		Orientation: player,
 	}, nil
 }
 
-func (s *Service) getFinishedGameSnapshot(game Game) (*GameSnapshot, error) {
+func (s *Service) getFinishedGameSnapshot(game Game, userID int) (*GameSnapshot, error) {
 	moves := strings.Fields(game.MovesUCI)
 	lastMove := ""
 	if len(moves) > 0 {
 		lastMove = moves[len(moves)-1]
 	}
+	player := "White"
+	if userID == *game.BlackUserID {
+		player = "Black"
+	}
 	return &GameSnapshot{
 		Game: GameJSON{
-			ID:       game.ID,
-			FEN:      "",
-			Turns:    len(moves),
-			Status:   string(game.Status),
-			LastMove: lastMove,
+			ID:        game.ID,
+			Speed:     game.Speed,
+			CreatedAt: game.CreatedAt.Unix(),
+			FEN:       game.FEN,
+			Turns:     len(moves),
+			Status:    string(game.Status),
+			Player:    player,
+			Winner:    game.Winner,
+			LastMove:  lastMove,
 		},
-		Clock: &ClockJSON{},
-		White: s.mapPlayer(game.WhiteUserID, "white"),
-		Black: s.mapPlayer(*game.BlackUserID, "black"),
-		Steps: mapSteps(game.MovesUCI),
+		Clock: &ClockJSON{
+			Running:   false,
+			Initial:   game.InitialTime,
+			Increment: game.Increment,
+			White:     game.WhiteTimeLeft,
+			Black:     game.BlackTimeLeft,
+		},
+		White:       s.mapPlayer(game.WhiteUserID, "white", game.Speed),
+		Black:       s.mapPlayer(*game.BlackUserID, "black", game.Speed),
+		Steps:       mapSteps(game.MovesUCI),
+		Orientation: player,
 	}, nil
 }
 
-func (s *Service) mapPlayer(userID int, color string) PlayerJSON {
+func (s *Service) mapPlayer(userID int, color string, speed string) PlayerJSON {
 	user, err := s.user.FindByUserID(context.Background(), strconv.Itoa(userID))
 	if err != nil {
 		return PlayerJSON{}
+	}
+
+	// Выбираем рейтинг в зависимости от категории скорости
+	var rating int
+	switch strings.ToLower(speed) {
+	case "bullet":
+		rating = user.EloBullet
+	case "blitz":
+		rating = user.EloBlitz
+	case "rapid":
+		rating = user.EloRapid
+	case "classical":
+		rating = user.EloClassical
+	default:
+		rating = user.EloRapid // Фолбек на рапид
 	}
 
 	return PlayerJSON{
@@ -194,9 +260,9 @@ func (s *Service) mapPlayer(userID int, color string) PlayerJSON {
 		User: UserJSON{
 			ID:       user.Id,
 			Username: user.Username,
-			Rating:   user.EloRapid,
+			Rating:   rating,
 		},
-		Rating: user.EloRapid,
+		Rating: rating,
 	}
 }
 
@@ -217,17 +283,18 @@ func mapSteps(movesUCI string) []StepJSON {
 			break
 		}
 
+		pos := game.Position()
+		san := chess.AlgebraicNotation{}.Encode(pos, move)
+
 		if err := game.Move(move); err != nil {
 			break
 		}
 
-		pos := game.Position()
-
 		step := StepJSON{
 			Ply:   i + 1,
 			UCI:   uci,
-			SAN:   chess.AlgebraicNotation{}.Encode(pos, move),
-			FEN:   pos.String(),
+			SAN:   san,
+			FEN:   game.Position().String(),
 			Check: move.HasTag(chess.Check),
 		}
 
@@ -241,46 +308,46 @@ func (s *Service) GetPlayers(gameId int) (int, int, error) {
 	return s.repo.GetPlayers(context.Background(), gameId)
 }
 
-func (s *Service) MakeMove(gameID, playerID int, move string) (OutgoingMessage, error) {
+func (s *Service) MakeMove(gameID, playerID int, move string) ([]OutgoingMessage, error) {
 	ctx := context.Background()
 	now := time.Now()
 
 	move = strings.TrimSpace(move)
 	if move == "" {
-		return OutgoingMessage{}, ErrEmptyMove
+		return []OutgoingMessage{}, ErrEmptyMove
 	}
 
 	state, err := s.repo.GetState(ctx, gameID)
 	if err != nil {
-		return OutgoingMessage{}, err
+		return []OutgoingMessage{}, err
 	}
 
 	switch state.Turn {
 	case 0:
 		if playerID != state.WhiteUserID {
-			return OutgoingMessage{}, ErrNotYourTurn
+			return []OutgoingMessage{}, ErrNotYourTurn
 		}
 	case 1:
 		if playerID != state.BlackUserID {
-			return OutgoingMessage{}, ErrNotYourTurn
+			return []OutgoingMessage{}, ErrNotYourTurn
 		}
 	default:
-		return OutgoingMessage{}, ErrInvalidTurnState
+		return []OutgoingMessage{}, ErrInvalidTurnState
 	}
 
 	if msg, err := s.checkFlag(ctx, state); err != nil {
-		return OutgoingMessage{}, err
+		return []OutgoingMessage{}, err
 	} else if msg != nil {
-		return *msg, nil
+		return []OutgoingMessage{*msg}, nil
 	}
 
 	g, err := BuildGameFromMoves(state.MovesUCI)
 	if err != nil {
-		return OutgoingMessage{}, err
+		return []OutgoingMessage{}, err
 	}
 
 	if err := g.MoveStr(move); err != nil {
-		return OutgoingMessage{}, ErrInvalidMove
+		return []OutgoingMessage{}, ErrInvalidMove
 	}
 
 	elapsed := int(now.Unix() - state.LastMoveAt)
@@ -304,48 +371,113 @@ func (s *Service) MakeMove(gameID, playerID int, move string) (OutgoingMessage, 
 	state.Turn = 1 - state.Turn
 
 	if state.Turn == 1 && len(strings.Fields(state.MovesUCI)) == 1 {
-		s.startFirstMoveTimer(gameID, state.BlackUserID, 60)
+		s.startFirstMoveTimer(gameID, 1, 60)
+	}
+
+	moves := g.Moves()
+	lastMove := moves[len(moves)-1]
+
+	positions := g.Positions()
+	if len(positions) < 2 {
+		return []OutgoingMessage{}, errors.New("internal error: no previous position")
+	}
+	prevPos := positions[len(positions)-2]
+
+	san := chess.AlgebraicNotation{}.Encode(
+		prevPos,
+		lastMove,
+	)
+	ply := len(strings.Fields(state.MovesUCI))
+	check := lastMove.HasTag(chess.Check)
+
+	moveMsg := OutgoingMessage{T: "move",
+		D: MoveJSON{
+			Clock: ClockJSON{
+				White: state.WhiteTimeLeft,
+				Black: state.BlackTimeLeft,
+			},
+			FEN:   state.FEN,
+			Ply:   ply,
+			SAN:   san,
+			UCI:   move,
+			Check: check,
+		},
 	}
 
 	if g.Outcome() != chess.NoOutcome {
 		var score float64
+		var winner string
+		var endStatus GameStatus
+		status := g.Outcome().String()
 		switch g.Outcome() {
 		case chess.WhiteWon:
 			score = 1
+			winner = "White"
+			endStatus = GameCheckmate
 		case chess.BlackWon:
 			score = 0
+			winner = "Black"
+			endStatus = GameCheckmate
 		case chess.Draw:
 			score = 0.5
+			winner = "Draw"
+			endStatus = GameDraw
 		default:
 			score = 0
+			winner = "White"
+			endStatus = GameCheckmate
+		}
+		moveMsg = OutgoingMessage{T: "move",
+			D: MoveJSON{
+				Clock: ClockJSON{
+					White: state.WhiteTimeLeft,
+					Black: state.BlackTimeLeft,
+				},
+				FEN:    state.FEN,
+				Ply:    ply,
+				SAN:    san,
+				UCI:    move,
+				Check:  check,
+				Winner: winner,
+				Status: status,
+			},
 		}
 		whiteDiff, blackDiff, err := s.user.UpdateRatings(ctx, state.WhiteUserID, state.BlackUserID, score, state.Speed)
 		if err != nil {
-			return OutgoingMessage{}, err
+			return []OutgoingMessage{}, err
 		}
-		if err := s.repo.FinishGame(ctx, gameID, state, whiteDiff, blackDiff); err != nil {
-			return OutgoingMessage{}, err
+		if err := s.repo.FinishGame(ctx, gameID, state, whiteDiff, blackDiff, winner, endStatus); err != nil {
+			return []OutgoingMessage{}, err
+		}
+
+		endGameMsg := OutgoingMessage{T: "EndData",
+			D: EndGameJSON{
+				Clock: ClockJSON{
+					White: state.WhiteTimeLeft,
+					Black: state.BlackTimeLeft,
+				},
+				RatingDiff: RatingDiffJSON{
+					White: whiteDiff,
+					Black: blackDiff,
+				},
+				Status: status,
+				Winner: winner,
+			},
 		}
 		_ = s.repo.DeleteState(ctx, state.GameID)
-		return OutgoingMessage{
-			T: "game_end",
-			D: map[string]any{
-				"outcome": g.Outcome().String(),
-				"method":  g.Method().String(),
-				"fen":     state.FEN,
-			},
-		}, nil
+		return []OutgoingMessage{moveMsg, endGameMsg}, nil
 	}
 
 	if err := s.repo.SaveState(ctx, state); err != nil {
-		return OutgoingMessage{}, err
+		return []OutgoingMessage{}, err
 	}
 
-	return OutgoingMessage{T: "move", D: state}, nil
+	return []OutgoingMessage{moveMsg}, nil
 }
 
 func (s *Service) checkFlag(ctx context.Context, state *GameState) (*OutgoingMessage, error) {
 	now := time.Now()
+	var endGameMsg OutgoingMessage
 
 	elapsed := int(now.Unix() - state.LastMoveAt)
 
@@ -356,35 +488,54 @@ func (s *Service) checkFlag(ctx context.Context, state *GameState) (*OutgoingMes
 			if err != nil {
 				return nil, err
 			}
-			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff); err != nil {
+			state.WhiteTimeLeft = 0
+			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff, "Black", GameOutOfTime); err != nil {
 				return nil, err
 			}
 			_ = s.repo.DeleteState(ctx, state.GameID)
-			return &OutgoingMessage{
-				T: "game_end",
-				D: map[string]any{
-					"outcome": "black",
-					"method":  "time",
+
+			endGameMsg = OutgoingMessage{T: "EndData",
+				D: EndGameJSON{
+					Clock: ClockJSON{
+						White: state.WhiteTimeLeft,
+						Black: state.BlackTimeLeft,
+					},
+					RatingDiff: RatingDiffJSON{
+						White: whiteDiff,
+						Black: blackDiff,
+					},
+					Status: "OutOfTime",
+					Winner: "Black",
 				},
-			}, nil
+			}
+			return &endGameMsg, nil
 		}
 	case 1:
 		if state.BlackTimeLeft-elapsed <= 0 {
-			whiteDiff, blackDiff, err := s.user.UpdateRatings(ctx, state.WhiteUserID, state.BlackUserID, 0, state.Speed)
+			whiteDiff, blackDiff, err := s.user.UpdateRatings(ctx, state.WhiteUserID, state.BlackUserID, 1, state.Speed)
 			if err != nil {
 				return nil, err
 			}
-			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff); err != nil {
+			state.BlackTimeLeft = 0
+			if err := s.repo.FinishGame(ctx, state.GameID, state, whiteDiff, blackDiff, "White", GameOutOfTime); err != nil {
 				return nil, err
 			}
 			_ = s.repo.DeleteState(ctx, state.GameID)
-			return &OutgoingMessage{
-				T: "game_end",
-				D: map[string]any{
-					"outcome": "white",
-					"method":  "time",
+			endGameMsg = OutgoingMessage{T: "EndData",
+				D: EndGameJSON{
+					Clock: ClockJSON{
+						White: state.WhiteTimeLeft,
+						Black: state.BlackTimeLeft,
+					},
+					RatingDiff: RatingDiffJSON{
+						White: whiteDiff,
+						Black: blackDiff,
+					},
+					Status: "OutOfTime",
+					Winner: "White",
 				},
-			}, nil
+			}
+			return &endGameMsg, nil
 		}
 	}
 
@@ -418,10 +569,13 @@ func (s *Service) Resign(gameID, playerID int) (OutgoingMessage, error) {
 	}
 
 	var score float64
+	var winner string
 	if playerID == state.WhiteUserID {
 		score = 0
+		winner = "Black"
 	} else if playerID == state.BlackUserID {
 		score = 1
+		winner = "White"
 	} else {
 		return OutgoingMessage{}, errors.New("invalid playerID")
 	}
@@ -431,18 +585,28 @@ func (s *Service) Resign(gameID, playerID int) (OutgoingMessage, error) {
 		return OutgoingMessage{}, err
 	}
 
-	if err := s.repo.FinishGame(ctx, gameID, state, whiteDiff, blackDiff); err != nil {
+	if err := s.repo.FinishGame(ctx, gameID, state, whiteDiff, blackDiff, winner, GameResign); err != nil {
 		return OutgoingMessage{}, err
+	}
+
+	endGameMsg := OutgoingMessage{T: "EndData",
+		D: EndGameJSON{
+			Clock: ClockJSON{
+				White: state.WhiteTimeLeft,
+				Black: state.BlackTimeLeft,
+			},
+			RatingDiff: RatingDiffJSON{
+				White: whiteDiff,
+				Black: blackDiff,
+			},
+			Status: "Resign",
+			Winner: winner,
+		},
 	}
 
 	_ = s.repo.DeleteState(ctx, gameID)
 
-	return OutgoingMessage{
-		T: "game_end",
-		D: map[string]any{
-			"outcome": "resign",
-		},
-	}, nil
+	return endGameMsg, nil
 }
 
 func TimeControlCategory(initialSeconds, incrementSeconds int) string {

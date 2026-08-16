@@ -20,5 +20,5 @@ func Register(
 
 	registerAuthRoutes(api, authHandler, sessionManager)
 	registerWebSocketRoutes(api, wsHandler, sessionManager)
-	registerGameRoutes(api, gameHandler)
+	registerGameRoutes(api, gameHandler, sessionManager)
 }
