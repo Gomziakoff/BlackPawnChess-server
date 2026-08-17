@@ -1,0 +1,35 @@
+name: Deploy Backend
+
+# Запуск при пуше в основную ветку
+on:
+  push:
+    branches:
+      - main  # Если ваша ветка называется master, замените main на master
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted  # Используем ваш локальный раннер
+
+    steps:
+      # 1. Получаем свежий код из репозитория в папку раннера
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Переносим файлы из папки раннера в папку, где их ожидает Docker Compose
+      # Используем rsync для синхронизации (удаляем то, чего нет в гите, исключая папку .git)
+      - name: Sync files to project folder
+        run: |
+          rsync -avz --delete --exclude='.git' ./ /home/oleksiiko/BlackPawnChess-server/
+
+      # 3. Пересобираем и перезапускаем только контейнер бэкенда
+      - name: Rebuild Backend Container
+        run: |
+          # Переходим в корень, где лежит docker-compose.yml
+          cd /home/oleksiiko
+          
+          # Собираем только сервис backend, чтобы не трогать базу и фронтенд
+          docker compose up -d --build backend
+
+      # 4. Очистка системы от старых ненужных образов (чтобы не кончалось место)
+      - name: Cleanup old images
+        run: docker image prune -f
