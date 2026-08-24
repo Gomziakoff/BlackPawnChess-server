@@ -91,7 +91,7 @@ func (h *Handler) Guest(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"id":       user.Id,
 		"username": user.Username,
-		"is_guest": true,
+		"IsGuest":  true,
 	})
 }
 
