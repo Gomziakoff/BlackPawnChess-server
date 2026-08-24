@@ -8,6 +8,7 @@ import (
 	"BlackPawnChess-server/internal/models"
 	"BlackPawnChess-server/internal/router"
 	"BlackPawnChess-server/internal/sessions"
+	"BlackPawnChess-server/internal/sitemap"
 	"BlackPawnChess-server/internal/ws"
 	"BlackPawnChess-server/pkg/helpers"
 	"strconv"
@@ -78,6 +79,7 @@ func main() {
 	wsHandler := ws.NewHandler(hub, gameHub, spectratorHub, matchmaker, gameService)
 
 	gameHandler := game.NewHandler(gameService)
+	sitemapHandler := sitemap.NewHandler(gameService)
 
 	gin.SetMode(helpers.GetEnv("GIN_MODE", "debug"))
 	r := gin.Default()
@@ -95,7 +97,7 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.Register(r, authHandler, wsHandler, gameHandler, sessionManager)
+	router.Register(r, authHandler, wsHandler, gameHandler, sessionManager, sitemapHandler)
 
 	srv := &http.Server{
 		Addr:    ":" + serverPort,

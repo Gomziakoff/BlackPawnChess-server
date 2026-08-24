@@ -138,6 +138,10 @@ func (s *Service) GetGame(gameID, userID int) (*GameSnapshot, error) {
 	return s.getFinishedGameSnapshot(game, userID)
 }
 
+func (s *Service) GetRecentPublicGameIDs(ctx context.Context, num int) ([]int, error) {
+	return s.repo.GetRecentPublicGameIDs(ctx, num)
+}
+
 func (s *Service) getActiveGameSnapshot(game Game, userID int) (*GameSnapshot, error) {
 	state, err := s.repo.GetState(context.Background(), game.ID)
 	if err != nil {

@@ -31,6 +31,21 @@ func (r *Repository) GetGame(ctx context.Context, gameID int) (Game, error) {
 	return g, nil
 }
 
+func (r *Repository) GetRecentPublicGameIDs(ctx context.Context, num int) ([]int, error) {
+	var ids []int
+	err := r.db.WithContext(ctx).
+		Model(Game{}).
+		Order("id DESC").
+		Limit(num).
+		Pluck("id", &ids).
+		Error
+
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (r *Repository) GetPlayers(ctx context.Context, gameID int) (int, int, error) {
 	var g Game
 	if err := r.db.WithContext(ctx).First(&g, gameID).Error; err != nil {

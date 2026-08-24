@@ -10,4 +10,5 @@ type GameService interface {
 	Flag(gameID int) (OutgoingMessage, error)
 	Resign(gameID, playerID int) (OutgoingMessage, error)
 	GetGame(gameID, userID int) (*GameSnapshot, error)
+	GetRecentPublicGameIDs(ctx context.Context, num int) ([]int, error)
 }
