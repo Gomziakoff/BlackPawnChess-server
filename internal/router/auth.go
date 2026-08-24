@@ -17,6 +17,7 @@ func registerAuthRoutes(
 	{
 		authGroup.POST("/register", handler.Register)
 		authGroup.POST("/login", handler.Login)
+		authGroup.POST("/guest", handler.Guest)
 	}
 
 	protected := authGroup.Group("/")

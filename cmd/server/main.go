@@ -35,6 +35,7 @@ func main() {
 	}
 
 	dsn := helpers.GetEnv("DB_DSN", "host=localhost user=chess_user password=secret dbname=chess port=5432 sslmode=disable")
+	log.Println("--- TRYING TO CONNECT WITH DSN:", dsn)
 	db, err := pdb.NewPostgres(dsn)
 	if err != nil {
 		log.Fatal(err)
