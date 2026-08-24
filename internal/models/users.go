@@ -9,6 +9,7 @@ type User struct {
 	Username     string `gorm:"size:32;not null"`
 	Email        string `gorm:"type:varchar(100);unique;not null"`
 	PasswordHash string `gorm:"not null"`
+	IsGuest      bool   `gorm:"default:false"`
 
 	EloClassical int `gorm:"default:1200"`
 	EloRapid     int `gorm:"default:1200"`

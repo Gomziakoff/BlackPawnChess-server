@@ -2,6 +2,7 @@ package pdb
 
 import (
 	"BlackPawnChess-server/internal/models"
+	"BlackPawnChess-server/pkg/helpers"
 	"context"
 	"errors"
 	"strconv"
@@ -25,6 +26,19 @@ func (r *Repository) Create(ctx context.Context, user *models.User) error {
 		return err
 	}
 	return nil
+}
+
+func (r *Repository) CreateGuest(ctx context.Context) (*models.User, error) {
+	guestName := "Guest_" + helpers.GenerateRandomString(6)
+	guest := &models.User{
+		Username: guestName,
+		Email:    guestName,
+		IsGuest:  true,
+	}
+	if err := r.db.WithContext(ctx).Create(guest).Error; err != nil {
+		return nil, err
+	}
+	return guest, nil
 }
 
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*models.User, error) {

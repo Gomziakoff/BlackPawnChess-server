@@ -13,6 +13,7 @@ import (
 
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
+	CreateGuest(ctx context.Context) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindByUserID(ctx context.Context, userID string) (*models.User, error)
 }
@@ -70,6 +71,27 @@ func (h *Handler) Register(c *gin.Context) {
 		"id":       user.Id,
 		"email":    user.Email,
 		"username": user.Username,
+	})
+}
+
+func (h *Handler) Guest(c *gin.Context) {
+	user, err := h.users.CreateGuest(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create guest user"})
+		return
+	}
+
+	sessionID, err := h.sessions.CreateSession(c.Request.Context(), user.Id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "session creation failed"})
+		return
+	}
+
+	setSessionCookie(c, sessionID)
+	c.JSON(http.StatusCreated, gin.H{
+		"id":       user.Id,
+		"username": user.Username,
+		"is_guest": true,
 	})
 }
 
